@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Оценка проекта</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      padding: 0 16px;
+      color: #333;
+      line-height: 1.5;
+    }
+    h1, h2, h3 {
+      margin-top: 0;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    input[type="text"], input[type="range"] {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      background: #007aff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    .rating-value {
+      font-size: 18px;
+      font-weight: bold;
+      margin: 8px 0;
+    }
+    .rating-item {
+      padding: 12px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .rating-item:last-child {
+      border-bottom: none;
+    }
+    .version-info {
+      margin-top: 40px;
+      padding: 16px;
+      background: #f8f9fa;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    .error {
+      color: #d32f2f;
+      margin: 12px 0;
+      display: none;
+    }
+    .loading {
+      color: #666;
+      text-align: center;
+      padding: 20px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Оцените наш проект</h1>
+
+  <div class="form-group">
+    <label for="name">Имя (необязательно)</label>
+    <input type="text" id="name" placeholder="Аноним" />
+  </div>
+
+  <div class="form-group">
+    <label>Оценка (1–10)</label>
+    <div class="rating-value" id="ratingValue">5</div>
+    <input type="range" id="rating" min="1" max="10" value="5" />
+  </div>
+
+  <div id="error" class="error"></div>
+  <button onclick="submitRating()">Отправить оценку</button>
+
+  <h2>Последние оценки</h2>
+  <div id="ratingsContainer">
+    <div class="loading" id="loadingRatings">Загрузка...</div>
+  </div>
+
+  <div class="version-info">
+    <p>Фронтенд: v1.0.0<br />
+    Бэкенд: <span id="backendVersion">загрузка...</span></p>
+  </div>
+
+  <script>
+    const BACKEND_URL = "https://__GATEWAY_DOMAIN__";
+
+    const ratingSlider = document.getElementById('rating');
+    const ratingValue = document.getElementById('ratingValue');
+    const errorDiv = document.getElementById('error');
+
+    ratingSlider.addEventListener('input', () => {
+      ratingValue.textContent = ratingSlider.value;
+    });
+
+    function showError(msg) {
+      errorDiv.textContent = msg;
+      errorDiv.style.display = 'block';
+      setTimeout(() => errorDiv.style.display = 'none', 5000);
+    }
+
+    async function submitRating() {
+      const name = document.getElementById('name').value.trim() || 'Аноним';
+      const rating = parseInt(ratingSlider.value);
+      if (rating < 1 || rating > 10) return showError('Оценка от 1 до 10');
+
+      try {
+        const res = await fetch(BACKEND_URL + '/api/rate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, rating })
+        });
+        const data = await res.json();
+        if (!res.ok) return showError(data.error || 'Ошибка');
+
+        document.getElementById('name').value = '';
+        ratingSlider.value = 5;
+        ratingValue.textContent = '5';
+        loadRatings();
+        alert('Спасибо за оценку!');
+      } catch (e) {
+        showError('Ошибка сети: ' + e.message);
+      }
+    }
+
+    async function loadRatings() {
+      const container = document.getElementById('ratingsContainer');
+      container.innerHTML = '<div class="loading">Загрузка...</div>';
+
+      try {
+        const res = await fetch(BACKEND_URL + '/api/ratings');
+        if (!res.ok) throw new Error('Не удалось загрузить');
+        const ratings = await res.json();
+
+        if (ratings.length === 0) {
+          container.innerHTML = '<p>Пока нет оценок.</p>';
+          return;
+        }
+
+        let html = '';
+        ratings.forEach(r => {
+          const d = new Date(r.created_at);
+          const ds = d.toLocaleString('ru-RU', {
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+          });
+          html += `<div class="rating-item"><strong>${r.name}</strong>: ${r.rating}/10<br><small>${ds}</small></div>`;
+        });
+        container.innerHTML = html;
+      } catch (e) {
+        container.innerHTML = `<p style="color:#c00">Ошибка загрузки: ${e.message}</p>`;
+      }
+    }
+
+    async function loadBackendVersion() {
+      try {
+        const res = await fetch(BACKEND_URL + '/api/version');
+        if (!res.ok) throw new Error();
+        const v = await res.json();
+        document.getElementById('backendVersion').textContent = `v${v.version} (ID: ${v.backend_id})`;
+      } catch {
+        document.getElementById('backendVersion').textContent = 'недоступен';
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      loadRatings();
+      loadBackendVersion();
+      setInterval(loadRatings, 30000);
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && ['name', 'rating'].includes(e.target.id)) {
+        submitRating();
+      }
+    });
+  </script>
+</body>
+</html>
