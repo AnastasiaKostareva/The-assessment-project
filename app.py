@@ -71,21 +71,16 @@ def handle_rate(body_str):
             return error_response('Rating must be between 1 and 10', 400)
 
         import time
-        rating_id = int(time.time() * 1000000)
+        import random
+        rating_id = int(time.time() * 1000000) + random.randint(0, 999999)
 
         def callee(session):
-            session.transaction().execute(
-                """
-                UPSERT INTO ratings (id, name, rating, created_at)
-                VALUES ($id, $name, $rating, CurrentUtcTimestamp())
-                """,
-                {
-                    '$id': rating_id,
-                    '$name': name,
-                    '$rating': rating
-                },
-                commit_tx=True
-            )
+            query = f"""
+            UPSERT INTO ratings (id, name, rating, created_at)
+            VALUES ({rating_id}, "{name}", {rating}, CurrentUtcTimestamp())
+            """
+            session.transaction().execute(query, commit_tx=True)
+        
         pool.retry_operation_sync(callee)
 
         print(f"Rating saved: {name} - {rating}")
@@ -95,10 +90,13 @@ def handle_rate(body_str):
             'id': rating_id
         })
 
-    except (ValueError, TypeError):
-        return error_response('Rating must be a number', 400)
+    except (ValueError, TypeError) as e:
+        print(f"Validation error: {e}")
+        return error_response('Rating must be a number between 1 and 10', 400)
     except Exception as e:
         print(f"Rate error: {e}")
+        import traceback
+        traceback.print_exc()
         return error_response(f'Server error: {str(e)}', 500)
 
 def handle_get_ratings():
@@ -112,7 +110,19 @@ def handle_get_ratings():
 
         ratings = []
         for row in result[0].rows:
-            dt = row.created_at.to_datetime() if hasattr(row.created_at, 'to_datetime') else datetime.utcnow()
+            try:
+                if hasattr(row.created_at, 'to_datetime'):
+                    dt = row.created_at.to_datetime()
+                elif hasattr(row.created_at, 'seconds'):
+                    dt = datetime.utcfromtimestamp(row.created_at.seconds)
+                elif isinstance(row.created_at, (int, float)):
+                    dt = datetime.utcfromtimestamp(row.created_at / 1000000)
+                else:
+                    dt = datetime.utcnow()
+            except Exception as e:
+                print(f"Error converting timestamp: {e}")
+                dt = datetime.utcnow()
+            
             ratings.append({
                 'name': row.name,
                 'rating': row.rating,
